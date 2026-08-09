@@ -16,12 +16,12 @@ Account rules encoded here (from account dashboard, 2026-08-06):
     - Profit target: $3,000 (evaluation phase).
 
 ASSUMPTIONS THAT NEED CONFIRMING WITH MO:
-    1. Trailing drawdown is calculated on LIVE EQUITY (unrealized P&L
-       included), not just closed balance. This is the safer assumption
-       and is standard for "Lightning"-style intraday trailing accounts.
-       If Tradeify actually trails on END-OF-DAY balance only, the engine
-       can be relaxed -- but starting conservative is correct on a live
-       funded account.
+    1. CONFIRMED (2026-08-09): the trailing drawdown floor recalculates
+       only at end-of-day session close, not continuously intraday. It
+       IS enforced in real time against live equity between recalcs --
+       a breach halts trading immediately even though the floor itself
+       only moves once per day. Implemented in update_equity() /
+       maybe_roll_daily_reset() below.
     2. The trail amount is currently inferred from the two account
        snapshots as ~$1,910.30 (balance - floor). This may not be the
        fixed trail Tradeify uses long-term (some firms stop trailing once
@@ -93,18 +93,21 @@ class RiskEngine:
     # -- equity / drawdown tracking -----------------------------------
 
     def update_equity(self, live_equity: float) -> None:
-        """Call this on every price tick / position mark-to-market update,
-        not just on trade close. Trailing drawdown on this account tracks
-        live equity (see ASSUMPTION 1)."""
+        """Call this on every price tick / position mark-to-market update.
+
+        CORRECTED (2026-08-09): Tradeify's floor only RECALCULATES at
+        end-of-day session close, not continuously through the day as
+        new intraday highs are made. It is, however, ENFORCED in real
+        time -- a breach against the current (fixed-for-the-day) floor
+        halts trading immediately. This method now only updates
+        current_equity, tracks the session's peak for use at the next
+        EOD rollover, and checks breach -- it does NOT move the floor
+        intraday. The floor itself only moves in maybe_roll_daily_reset()."""
         self.state.current_equity = live_equity
+        self.state.daily_pnl = live_equity - self.state.daily_start_equity
 
         if live_equity > self.state.high_water_mark:
-            self.state.high_water_mark = live_equity
-            new_floor = round(live_equity - self.cfg.trail_amount, 2)
-            # floor only ever moves up, never down
-            self.state.trailing_floor = max(self.state.trailing_floor, new_floor)
-
-        self.state.daily_pnl = live_equity - self.state.daily_start_equity
+            self.state.high_water_mark = live_equity  # peak tracked, NOT applied to floor yet
 
         if live_equity <= self.state.trailing_floor:
             self.state.trading_halted_reason = (
@@ -120,6 +123,12 @@ class RiskEngine:
         )
         crossed = (now >= boundary_today) and (last < boundary_today)
         if crossed:
+            # Floor recalculation happens HERE, once per day, from the
+            # session's high-water mark -- not intraday. Still never moves
+            # down, per the "One Rule."
+            new_floor = round(self.state.high_water_mark - self.cfg.trail_amount, 2)
+            self.state.trailing_floor = max(self.state.trailing_floor, new_floor)
+
             if self.state.daily_pnl > 0:
                 self.state.cumulative_profit_since_reset += self.state.daily_pnl
                 self.state.best_single_day_profit = max(
