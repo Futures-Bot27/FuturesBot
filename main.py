@@ -51,7 +51,7 @@ def _load_instruments() -> list[InstrumentConfig]:
     instruments = []
     for prefix, default_symbol, default_mult, default_fee in [
         ("MGC", "XAU/USD", 10.0, 2.50),
-        ("MNQ", "NDX", 2.0, 1.50),
+        ("MNQ", "QQQ", 2.0, 1.50),
     ]:
         ticker = os.environ.get(f"{prefix}_TICKER", "")
         if not ticker:
