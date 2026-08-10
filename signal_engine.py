@@ -16,6 +16,7 @@ compliant" allowance.
 """
 
 import os
+import time
 import requests
 import numpy as np
 from dataclasses import dataclass
@@ -42,22 +43,36 @@ TWELVE_DATA_API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
 
 
 def fetch_bars(symbol: str, interval: str = "15min", outputsize: int = 100) -> list[dict]:
-    resp = requests.get(
-        "https://api.twelvedata.com/time_series",
-        params={
-            "symbol": symbol,
-            "interval": interval,
-            "outputsize": outputsize,
-            "apikey": TWELVE_DATA_API_KEY,
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if "values" not in data:
-        raise RuntimeError(f"Twelve Data error: {data}")
-    bars = list(reversed(data["values"]))  # oldest first
-    return bars
+    """Fetches with one retry-with-backoff on 429 (rate limit). If this
+    API key is shared across your other bots (AURUM, Onyx, Aura FX,
+    TITAN, etc.), a 429 here likely means the SHARED account budget is
+    exhausted, not this bot alone -- a single retry won't fix that, only
+    reducing total request volume across all bots will."""
+    for attempt in range(2):
+        resp = requests.get(
+            "https://api.twelvedata.com/time_series",
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "outputsize": outputsize,
+                "apikey": TWELVE_DATA_API_KEY,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 429:
+            if attempt == 0:
+                time.sleep(20)
+                continue
+            raise RuntimeError(
+                f"Twelve Data rate limited (429) for {symbol} after retry -- "
+                f"likely shared API key budget exhausted across your other bots."
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        if "values" not in data:
+            raise RuntimeError(f"Twelve Data error: {data}")
+        return list(reversed(data["values"]))  # oldest first
+    return []
 
 
 def _closes(bars: list[dict]) -> np.ndarray:
