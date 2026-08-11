@@ -146,12 +146,30 @@ def fetch_bars_yfinance(symbol: str, interval: str = "15m", period: str = "5d") 
     (via NQ=F) because it trades at the SAME price scale as MNQ (index
     points), unlike QQQ which is ~40x off and would badly miscalculate
     percent-based stop/target prices if used as the reference entry price
-    sent to TradersPost."""
-    df = yf.Ticker(symbol).history(interval=interval, period=period)
-    bars = []
-    for _, row in df.iterrows():
-        bars.append({"close": float(row["Close"]), "high": float(row["High"]), "low": float(row["Low"])})
-    return bars
+    sent to TradersPost.
+
+    KNOWN RISK: Yahoo Finance actively blocks requests from cloud/
+    datacenter IPs (AWS, Railway, etc.) to stop scraping, and does so
+    inconsistently -- sometimes returns data, sometimes silently returns
+    an empty result with no error. One retry is attempted here, but if
+    this keeps failing on Railway specifically, MNQ's price source likely
+    needs to move off yfinance to something paid/reliable for cloud use."""
+    for attempt in range(2):
+        df = yf.Ticker(symbol).history(interval=interval, period=period)
+        if not df.empty:
+            bars = []
+            for _, row in df.iterrows():
+                bars.append({"close": float(row["Close"]), "high": float(row["High"]), "low": float(row["Low"])})
+            return bars
+        if attempt == 0:
+            time.sleep(5)
+    raise RuntimeError(
+        f"yfinance returned NO DATA for {symbol} after retry. This commonly "
+        f"happens when Yahoo Finance blocks requests from cloud/datacenter IPs "
+        f"(Railway included) -- not necessarily a bad symbol or market-closed "
+        f"issue. If this recurs often, MNQ's price source likely needs to move "
+        f"off yfinance."
+    )
 
 
 def generate_signal(symbol: str, interval: str = "15min", min_score: int = 3,
