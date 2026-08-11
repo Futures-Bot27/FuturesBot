@@ -44,7 +44,9 @@ from typing import Optional
 
 @dataclass
 class AccountConfig:
-    account_size: float = 50_000.00
+    account_size: float = 50_207.14  # your actual real starting balance --
+                                       # was 50000.00, causing a false ~$207
+                                       # "profit" artifact on every state reset
     daily_loss_limit: float = 1_250.00
     profit_target: float = 3_000.00
     consistency_cap_pct: float = 0.20          # 20% max single-day share
