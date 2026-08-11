@@ -70,8 +70,10 @@ def _load_instruments() -> list[InstrumentConfig]:
 
 INSTRUMENTS = _load_instruments()
 SIGNAL_INTERVAL = os.environ.get("SIGNAL_INTERVAL", "15min")
-LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", "60"))
+LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", "900"))
 MIN_CONFLUENCE_SCORE = int(os.environ.get("MIN_CONFLUENCE_SCORE", "3"))
+SL_ATR_MULTIPLIER = float(os.environ.get("SL_ATR_MULTIPLIER", "1.5"))
+TP_ATR_MULTIPLIER = float(os.environ.get("TP_ATR_MULTIPLIER", "2.5"))
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 STARTING_BALANCE = float(os.environ.get("STARTING_BALANCE", "50207.14"))
 
@@ -160,10 +162,16 @@ async def trading_cycle() -> None:
         if instrument_risk_room <= 0:
             continue
 
+        # Percent-based, not fixed price-point -- see traderspost_client.py
+        # docstring for why (QQQ-vs-MNQ price scale mismatch).
+        sl_pct = (result.atr / result.price) * SL_ATR_MULTIPLIER * 100
+        tp_pct = (result.atr / result.price) * TP_ATR_MULTIPLIER * 100
+
         msg = (
             f"📊 [{inst.name}] Signal: {result.signal.value} on {inst.traderspost_ticker} "
             f"(score {result.confluence_score}/{result.max_score}) @ {result.price:.2f}\n"
             f"Reasons: {'; '.join(result.reasons)}\n"
+            f"Stop: {sl_pct:.3f}% | Target: {tp_pct:.3f}%\n"
             f"Shared equity est.: ${equity:,.2f} | {inst.name} risk share: "
             f"${instrument_risk_room:.2f} of ${total_risk_room:.2f} total | Qty: {inst.order_qty}"
         )
@@ -180,7 +188,9 @@ async def trading_cycle() -> None:
                 tracker.close(inst.name, result.price)
 
             webhook_resp = traderspost_client.send_order(
-                inst.traderspost_ticker, desired_side.lower(), inst.order_qty
+                inst.traderspost_ticker, desired_side.lower(), inst.order_qty,
+                stop_loss_percent=sl_pct,
+                take_profit_percent=tp_pct,
             )
             tracker.open(inst.name, desired_side, inst.order_qty, result.price,
                          inst.contract_multiplier, inst.fee_round_trip)
