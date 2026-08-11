@@ -19,6 +19,7 @@ import os
 import time
 import requests
 import numpy as np
+import yfinance as yf
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -139,8 +140,26 @@ def in_active_session(now: datetime | None = None) -> bool:
 
 # -- confluence scoring --------------------------------------------------
 
-def generate_signal(symbol: str, interval: str = "15min", min_score: int = 3) -> SignalResult:
-    bars = fetch_bars(symbol, interval=interval, outputsize=100)
+def fetch_bars_yfinance(symbol: str, interval: str = "15m", period: str = "5d") -> list[dict]:
+    """Real futures price via yfinance -- same workaround pattern used for
+    Onyx Commodities when Twelve Data's coverage fell short. Used for MNQ
+    (via NQ=F) because it trades at the SAME price scale as MNQ (index
+    points), unlike QQQ which is ~40x off and would badly miscalculate
+    percent-based stop/target prices if used as the reference entry price
+    sent to TradersPost."""
+    df = yf.Ticker(symbol).history(interval=interval, period=period)
+    bars = []
+    for _, row in df.iterrows():
+        bars.append({"close": float(row["Close"]), "high": float(row["High"]), "low": float(row["Low"])})
+    return bars
+
+
+def generate_signal(symbol: str, interval: str = "15min", min_score: int = 3,
+                     source: str = "twelvedata") -> SignalResult:
+    if source == "yfinance":
+        bars = fetch_bars_yfinance(symbol, interval="15m", period="5d")
+    else:
+        bars = fetch_bars(symbol, interval=interval, outputsize=100)
     closes = _closes(bars)
     highs = _highs(bars)
     lows = _lows(bars)

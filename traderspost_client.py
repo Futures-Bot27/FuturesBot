@@ -22,26 +22,26 @@ import requests
 TRADERSPOST_WEBHOOK_URL = os.environ.get("TRADERSPOST_WEBHOOK_URL", "")
 
 
-def send_order(ticker: str, action: str, quantity: int,
+def send_order(ticker: str, action: str, quantity: int, price: float,
                 stop_loss_percent: float | None = None,
                 take_profit_percent: float | None = None) -> dict:
     """action: 'buy' or 'sell' (lowercase, per TradersPost spec).
 
+    price: the reference entry price used to calculate relative
+    stop_loss_percent/take_profit_percent into actual broker-side price
+    levels. REQUIRED for Tradovate market orders -- TradersPost cannot
+    auto-fetch a quote for this broker/asset combination, confirmed by
+    the "PRICE REQUIRED FOR RELATIVE CALCULATION" error seen live.
+    This MUST be at the same price scale as what the broker will
+    actually fill at (e.g. real MNQ/NQ index points, NOT a QQQ ETF
+    price) or the calculated stop/target will be wildly wrong even
+    though the percent itself is correct.
+
     stop_loss_percent / take_profit_percent: PERCENTAGE distance from
     entry (e.g. 0.5 = 0.5%). Percent-based brackets are used deliberately
-    instead of a fixed price-point offset: MNQ's signal is generated from
-    a QQQ proxy price (since NDX needs a paid Twelve Data plan), which
-    trades at a completely different absolute price scale than the real
-    MNQ futures contract (~$580 vs ~23,000). A fixed-point offset
-    calculated in QQQ dollars would be meaningless applied to MNQ's real
-    entry price. Percent is scale-invariant and avoids this entirely --
-    TradersPost calculates the actual stop/target price using the real
-    broker-side entry price, not the signal source's price.
-
-    IMPORTANT: verify these field names via TradersPost's Submit Signal
-    JSON builder before trusting blind, same as the ticker-format lesson
-    from earlier -- confirmed against their documented examples, not
-    tested against a live response in this session."""
+    instead of a fixed price-point offset -- see generate_signal's
+    `source` parameter for how each instrument's price is kept at the
+    correct scale."""
     if not TRADERSPOST_WEBHOOK_URL:
         raise RuntimeError("TRADERSPOST_WEBHOOK_URL not set in environment.")
     payload = {
@@ -49,6 +49,7 @@ def send_order(ticker: str, action: str, quantity: int,
         "action": action,
         "orderType": "market",
         "quantity": quantity,
+        "price": round(price, 4),
     }
     if stop_loss_percent is not None:
         payload["stopLoss"] = {"type": "stop", "percent": round(stop_loss_percent, 3)}

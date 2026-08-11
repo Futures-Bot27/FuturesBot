@@ -40,7 +40,8 @@ log = logging.getLogger("tradeify_bot")
 class InstrumentConfig:
     name: str                    # short key, e.g. "MGC"
     traderspost_ticker: str      # e.g. "MGCZ2026" -- confirmed via Submit Signal tool
-    twelve_data_symbol: str      # e.g. "XAU/USD"
+    price_symbol: str            # symbol to fetch price/bars from
+    data_source: str             # "twelvedata" or "yfinance"
     contract_multiplier: float   # $ per 1-unit price move, per contract
     fee_round_trip: float
     risk_share: float            # fraction of remaining risk budget, e.g. 0.5
@@ -49,9 +50,9 @@ class InstrumentConfig:
 
 def _load_instruments() -> list[InstrumentConfig]:
     instruments = []
-    for prefix, default_symbol, default_mult, default_fee in [
-        ("MGC", "XAU/USD", 10.0, 2.50),
-        ("MNQ", "QQQ", 2.0, 1.50),
+    for prefix, default_symbol, default_source, default_mult, default_fee in [
+        ("MGC", "XAU/USD", "twelvedata", 10.0, 2.50),
+        ("MNQ", "NQ=F", "yfinance", 2.0, 1.50),  # NQ=F, not QQQ -- see signal_engine.py
     ]:
         ticker = os.environ.get(f"{prefix}_TICKER", "")
         if not ticker:
@@ -59,7 +60,8 @@ def _load_instruments() -> list[InstrumentConfig]:
         instruments.append(InstrumentConfig(
             name=prefix,
             traderspost_ticker=ticker,
-            twelve_data_symbol=os.environ.get(f"{prefix}_TWELVE_DATA_SYMBOL", default_symbol),
+            price_symbol=os.environ.get(f"{prefix}_PRICE_SYMBOL", default_symbol),
+            data_source=os.environ.get(f"{prefix}_DATA_SOURCE", default_source),
             contract_multiplier=float(os.environ.get(f"{prefix}_MULTIPLIER", default_mult)),
             fee_round_trip=float(os.environ.get(f"{prefix}_FEE_ROUND_TRIP", default_fee)),
             risk_share=float(os.environ.get(f"{prefix}_RISK_SHARE", "0.5")),
@@ -114,7 +116,8 @@ async def trading_cycle() -> None:
     for inst in INSTRUMENTS:
         try:
             result = signal_engine.generate_signal(
-                inst.twelve_data_symbol, interval=SIGNAL_INTERVAL, min_score=MIN_CONFLUENCE_SCORE
+                inst.price_symbol, interval=SIGNAL_INTERVAL, min_score=MIN_CONFLUENCE_SCORE,
+                source=inst.data_source,
             )
             signals[inst.name] = result
             live_prices[inst.name] = result.price
@@ -189,6 +192,7 @@ async def trading_cycle() -> None:
 
             webhook_resp = traderspost_client.send_order(
                 inst.traderspost_ticker, desired_side.lower(), inst.order_qty,
+                price=result.price,
                 stop_loss_percent=sl_pct,
                 take_profit_percent=tp_pct,
             )
