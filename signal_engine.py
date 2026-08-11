@@ -37,6 +37,7 @@ class SignalResult:
     max_score: int
     reasons: list[str]
     price: float
+    atr: float
 
 
 TWELVE_DATA_API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
@@ -190,11 +191,11 @@ def generate_signal(symbol: str, interval: str = "15min", min_score: int = 3) ->
 
     if not in_active_session():
         reasons.append("Outside active session hours -- skip")
-        return SignalResult(Signal.NONE, 0, max_score, reasons, price)
+        return SignalResult(Signal.NONE, 0, max_score, reasons, price, current_atr)
 
     if long_score >= min_score and long_score > short_score:
-        return SignalResult(Signal.BUY, long_score, max_score, reasons, price)
+        return SignalResult(Signal.BUY, long_score, max_score, reasons, price, current_atr)
     elif short_score >= min_score and short_score > long_score:
-        return SignalResult(Signal.SELL, short_score, max_score, reasons, price)
+        return SignalResult(Signal.SELL, short_score, max_score, reasons, price, current_atr)
     else:
-        return SignalResult(Signal.NONE, max(long_score, short_score), max_score, reasons, price)
+        return SignalResult(Signal.NONE, max(long_score, short_score), max_score, reasons, price, current_atr)
