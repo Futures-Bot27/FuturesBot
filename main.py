@@ -165,16 +165,27 @@ async def trading_cycle() -> None:
         if instrument_risk_room <= 0:
             continue
 
-        # Percent-based, not fixed price-point -- see traderspost_client.py
-        # docstring for why (QQQ-vs-MNQ price scale mismatch).
-        sl_pct = (result.atr / result.price) * SL_ATR_MULTIPLIER * 100
-        tp_pct = (result.atr / result.price) * TP_ATR_MULTIPLIER * 100
+        # Compute ABSOLUTE stop/target prices ourselves, with the correct
+        # sign for the trade direction -- see traderspost_client.py
+        # docstring for why (a live test showed the platform's own
+        # percent-based side calculation placed a short's stop on the
+        # wrong side, and it got rejected, leaving the position
+        # unprotected).
+        distance_pct = (result.atr / result.price)
+        sl_dist = result.price * distance_pct * SL_ATR_MULTIPLIER
+        tp_dist = result.price * distance_pct * TP_ATR_MULTIPLIER
+        if desired_side == "Buy":
+            stop_price = result.price - sl_dist
+            target_price = result.price + tp_dist
+        else:  # Sell / short
+            stop_price = result.price + sl_dist
+            target_price = result.price - tp_dist
 
         msg = (
             f"📊 [{inst.name}] Signal: {result.signal.value} on {inst.traderspost_ticker} "
             f"(score {result.confluence_score}/{result.max_score}) @ {result.price:.2f}\n"
             f"Reasons: {'; '.join(result.reasons)}\n"
-            f"Stop: {sl_pct:.3f}% | Target: {tp_pct:.3f}%\n"
+            f"Stop: {stop_price:.2f} | Target: {target_price:.2f}\n"
             f"Shared equity est.: ${equity:,.2f} | {inst.name} risk share: "
             f"${instrument_risk_room:.2f} of ${total_risk_room:.2f} total | Qty: {inst.order_qty}"
         )
@@ -193,8 +204,8 @@ async def trading_cycle() -> None:
             webhook_resp = traderspost_client.send_order(
                 inst.traderspost_ticker, desired_side.lower(), inst.order_qty,
                 price=result.price,
-                stop_loss_percent=sl_pct,
-                take_profit_percent=tp_pct,
+                stop_price=stop_price,
+                target_price=target_price,
             )
             tracker.open(inst.name, desired_side, inst.order_qty, result.price,
                          inst.contract_multiplier, inst.fee_round_trip)
