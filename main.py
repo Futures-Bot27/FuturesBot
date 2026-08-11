@@ -247,6 +247,7 @@ def status():
 
 class ReconcileBody(BaseModel):
     real_balance: float
+    reset_daily_tracking: bool = True  # True = treat real_balance as today's fresh baseline too
 
 
 @app.post("/reconcile")
@@ -257,9 +258,17 @@ def reconcile(body: ReconcileBody):
         engine.state.high_water_mark = body.real_balance
         new_floor = round(body.real_balance - cfg.trail_amount, 2)
         engine.state.trailing_floor = max(engine.state.trailing_floor, new_floor)
+    if body.reset_daily_tracking:
+        # Prevents the exact bug where a state reset (e.g. from a Railway
+        # redeploy wiping persistence) makes the jump from a stale default
+        # baseline to the real balance look like fabricated same-day profit,
+        # falsely tripping the consistency cap.
+        engine.state.daily_start_equity = body.real_balance
+        engine.state.daily_pnl = 0.0
     persistence.save_state(engine.state)
     notify(f"🔄 Reconciled: real balance ${body.real_balance:,.2f} confirmed.")
-    return {"status": "reconciled", "new_floor": engine.state.trailing_floor}
+    return {"status": "reconciled", "new_floor": engine.state.trailing_floor,
+            "daily_pnl": engine.state.daily_pnl}
 
 
 @app.post("/flatten")
