@@ -22,8 +22,26 @@ import requests
 TRADERSPOST_WEBHOOK_URL = os.environ.get("TRADERSPOST_WEBHOOK_URL", "")
 
 
-def send_order(ticker: str, action: str, quantity: int) -> dict:
-    """action: 'buy' or 'sell' (lowercase, per TradersPost spec)."""
+def send_order(ticker: str, action: str, quantity: int,
+                stop_loss_percent: float | None = None,
+                take_profit_percent: float | None = None) -> dict:
+    """action: 'buy' or 'sell' (lowercase, per TradersPost spec).
+
+    stop_loss_percent / take_profit_percent: PERCENTAGE distance from
+    entry (e.g. 0.5 = 0.5%). Percent-based brackets are used deliberately
+    instead of a fixed price-point offset: MNQ's signal is generated from
+    a QQQ proxy price (since NDX needs a paid Twelve Data plan), which
+    trades at a completely different absolute price scale than the real
+    MNQ futures contract (~$580 vs ~23,000). A fixed-point offset
+    calculated in QQQ dollars would be meaningless applied to MNQ's real
+    entry price. Percent is scale-invariant and avoids this entirely --
+    TradersPost calculates the actual stop/target price using the real
+    broker-side entry price, not the signal source's price.
+
+    IMPORTANT: verify these field names via TradersPost's Submit Signal
+    JSON builder before trusting blind, same as the ticker-format lesson
+    from earlier -- confirmed against their documented examples, not
+    tested against a live response in this session."""
     if not TRADERSPOST_WEBHOOK_URL:
         raise RuntimeError("TRADERSPOST_WEBHOOK_URL not set in environment.")
     payload = {
@@ -32,6 +50,10 @@ def send_order(ticker: str, action: str, quantity: int) -> dict:
         "orderType": "market",
         "quantity": quantity,
     }
+    if stop_loss_percent is not None:
+        payload["stopLoss"] = {"type": "stop", "percent": round(stop_loss_percent, 3)}
+    if take_profit_percent is not None:
+        payload["takeProfit"] = {"percent": round(take_profit_percent, 3)}
     resp = requests.post(TRADERSPOST_WEBHOOK_URL, json=payload, timeout=15)
     resp.raise_for_status()
     return resp.json() if resp.content else {"status": resp.status_code}
