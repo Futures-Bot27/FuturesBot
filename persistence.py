@@ -13,7 +13,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from risk_engine import RiskState
 
-DB_PATH = Path(__file__).parent / "state.db"
+import os
+
+# Uses Railway's persistent volume when mounted (set DATA_DIR=/data in
+# Railway, matching the volume's mount path). Falls back to a local file
+# for running this outside Railway (e.g. on your own machine). Without a
+# mounted volume, this file is wiped on every redeploy -- see README.
+DB_PATH = Path(os.environ.get("DATA_DIR", Path(__file__).parent)) / "state.db"
 
 
 def _connect():
