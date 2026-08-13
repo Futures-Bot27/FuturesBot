@@ -24,6 +24,8 @@ class OpenPosition:
     entry_price: float
     multiplier: float  # $ per 1-unit price move, per contract
     fee_round_trip: float
+    stop_price: float | None = None
+    target_price: float | None = None
 
 
 @dataclass
@@ -41,10 +43,12 @@ class EquityTracker:
         self.realized_pnl = 0.0
 
     def open(self, instrument: str, side: str, qty: int, entry_price: float,
-              multiplier: float, fee_round_trip: float) -> None:
+              multiplier: float, fee_round_trip: float,
+              stop_price: float | None = None, target_price: float | None = None) -> None:
         self.positions[instrument] = OpenPosition(
             side=side, qty=qty, entry_price=entry_price,
             multiplier=multiplier, fee_round_trip=fee_round_trip,
+            stop_price=stop_price, target_price=target_price,
         )
 
     def close(self, instrument: str, exit_price: float) -> float:
@@ -57,6 +61,31 @@ class EquityTracker:
         self.realized_pnl += pnl
         del self.positions[instrument]
         return pnl
+
+    def check_bracket_hit(self, instrument: str, live_price: float) -> str | None:
+        """Infers whether a stop or target was likely filled by the broker,
+        since TradersPost provides no fill/position feedback loop at all
+        (confirmed: no order IDs, no position state, no account info sent
+        back to strategy logic). This is an INFERENCE from price crossing
+        the recorded level, not a confirmed fill -- gaps or slippage mean
+        the real fill price may differ slightly from the recorded
+        stop_price/target_price. Returns 'stop', 'target', or None.
+        Caller is responsible for calling close() using the appropriate
+        recorded price once this returns non-None."""
+        pos = self.positions.get(instrument)
+        if pos is None:
+            return None
+        if pos.side == "Buy":
+            if pos.stop_price is not None and live_price <= pos.stop_price:
+                return "stop"
+            if pos.target_price is not None and live_price >= pos.target_price:
+                return "target"
+        else:  # Sell / short
+            if pos.stop_price is not None and live_price >= pos.stop_price:
+                return "stop"
+            if pos.target_price is not None and live_price <= pos.target_price:
+                return "target"
+        return None
 
     def current_equity(self, live_prices: dict[str, float]) -> float:
         """live_prices: {instrument_name: current_price}. Any open

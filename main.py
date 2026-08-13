@@ -127,6 +127,30 @@ async def trading_cycle() -> None:
     if not live_prices:
         return  # every feed failed this cycle
 
+    # 1b. Check every open position for a likely stop/target fill BEFORE
+    #     anything else. TradersPost provides no fill/position feedback at
+    #     all, so this is an INFERENCE from price crossing the recorded
+    #     level -- see equity_tracker.check_bracket_hit() docstring.
+    for inst in INSTRUMENTS:
+        if inst.name not in tracker.positions:
+            continue
+        price = live_prices.get(inst.name)
+        if price is None:
+            continue
+        hit = tracker.check_bracket_hit(inst.name, price)
+        if hit is not None:
+            pos = tracker.positions[inst.name]
+            close_price = pos.stop_price if hit == "stop" else pos.target_price
+            pnl = tracker.close(inst.name, close_price)
+            emoji = "🔴" if hit == "stop" else "🟢"
+            notify(
+                f"{emoji} [{inst.name}] {hit.upper()} likely hit (inferred from price) "
+                f"@ {close_price:.2f} -- est. P&L: ${pnl:.2f}. "
+                f"Confirm the actual fill in Tradovate and reconcile if it differs."
+            )
+            persistence.log_trade(inst.traderspost_ticker, "N/A", pos.qty, close_price,
+                                   f"inferred_{hit}", True, f"est_pnl={pnl:.2f}")
+
     # 2. Update the ONE shared equity estimate from ALL open positions
     equity = tracker.current_equity(live_prices)
     engine.update_equity(equity)
@@ -208,7 +232,8 @@ async def trading_cycle() -> None:
                 target_price=target_price,
             )
             tracker.open(inst.name, desired_side, inst.order_qty, result.price,
-                         inst.contract_multiplier, inst.fee_round_trip)
+                         inst.contract_multiplier, inst.fee_round_trip,
+                         stop_price=stop_price, target_price=target_price)
             persistence.log_trade(inst.traderspost_ticker, desired_side, inst.order_qty,
                                    result.price, "signal", True, str(webhook_resp))
             notify(f"✅ SIGNAL SENT TO TRADERSPOST\n{msg}\nResponse: {webhook_resp}")
