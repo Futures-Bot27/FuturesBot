@@ -52,7 +52,7 @@ def _load_instruments() -> list[InstrumentConfig]:
     instruments = []
     for prefix, default_symbol, default_source, default_mult, default_fee in [
         ("MGC", "XAU/USD", "twelvedata", 10.0, 2.50),
-        ("MNQ", "NQ=F", "yfinance", 2.0, 1.50),  # NQ=F, not QQQ -- see signal_engine.py
+        ("MNQ", "nq.f", "stooq", 2.0, 1.50),  # nq.f via Stooq -- less blocked than yfinance on cloud IPs
     ]:
         ticker = os.environ.get(f"{prefix}_TICKER", "")
         if not ticker:

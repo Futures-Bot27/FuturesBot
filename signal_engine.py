@@ -140,6 +140,50 @@ def in_active_session(now: datetime | None = None) -> bool:
 
 # -- confluence scoring --------------------------------------------------
 
+def fetch_bars_stooq(symbol: str, interval: str = "15") -> list[dict]:
+    """Free alternative to yfinance -- Stooq serves data differently and
+    is generally less aggressively blocked on cloud/datacenter IPs than
+    Yahoo Finance, though their free intraday access has gotten more
+    restricted over time and isn't guaranteed. Symbol convention: 'nq.f'
+    for Nasdaq futures continuous contract (Stooq's '.f' suffix mirrors
+    yfinance's '=F' for US futures). interval: minutes as a string
+    ('5', '15', '30', '60') -- not all symbols/intervals are available
+    on the free tier; this raises a clear error if the response is
+    empty or unusable rather than failing silently."""
+    url = f"https://stooq.com/q/d/l/?s={symbol}&i={interval}"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    text = resp.text.strip()
+    if not text or "," not in text or text.lower().startswith("no data"):
+        raise RuntimeError(
+            f"Stooq returned no usable data for {symbol} at interval={interval} "
+            f"(response: {text[:150]!r}). Free intraday access on Stooq may not "
+            f"cover this symbol/interval -- if this persists, a paid data source "
+            f"is likely needed instead."
+        )
+    lines = text.splitlines()
+    header = [h.strip() for h in lines[0].split(",")]
+    try:
+        hi, lo, cl = header.index("High"), header.index("Low"), header.index("Close")
+    except ValueError:
+        raise RuntimeError(f"Stooq response for {symbol} had unexpected columns: {header}")
+    bars = []
+    for line in lines[1:]:
+        parts = line.split(",")
+        if len(parts) <= max(hi, lo, cl):
+            continue
+        try:
+            bars.append({"high": float(parts[hi]), "low": float(parts[lo]), "close": float(parts[cl])})
+        except ValueError:
+            continue
+    if len(bars) < 20:
+        raise RuntimeError(
+            f"Stooq returned only {len(bars)} usable bars for {symbol} -- "
+            f"not enough for reliable indicators (need 20+)."
+        )
+    return bars
+
+
 def fetch_bars_yfinance(symbol: str, interval: str = "15m", period: str = "5d") -> list[dict]:
     """Real futures price via yfinance -- same workaround pattern used for
     Onyx Commodities when Twelve Data's coverage fell short. Used for MNQ
@@ -176,6 +220,8 @@ def generate_signal(symbol: str, interval: str = "15min", min_score: int = 3,
                      source: str = "twelvedata") -> SignalResult:
     if source == "yfinance":
         bars = fetch_bars_yfinance(symbol, interval="15m", period="5d")
+    elif source == "stooq":
+        bars = fetch_bars_stooq(symbol, interval="15")
     else:
         bars = fetch_bars(symbol, interval=interval, outputsize=100)
     closes = _closes(bars)
